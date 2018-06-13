@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package job;
+
+service Service {
+    rpc Ask(Passphrase) returns (stream Job) {}
+}
+
+message Job {
+    string payload = 1; // json string
+    map<string, string> metadata = 2;
+}
+
+message Passphrase {
+    string code = 1;
+}
