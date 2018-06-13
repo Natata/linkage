@@ -18,7 +18,7 @@ type Server struct {
 	at      Addr
 	srvOpts []grpc.ServerOption
 	engine  Engine
-	agent   *Agent
+	client  *Client
 	jc      chan *Job
 }
 
@@ -71,11 +71,11 @@ func (s *Server) Run(from Addr, dialOpts []grpc.DialOption) error {
 }
 
 func (s *Server) connect(from Addr, opts []grpc.DialOption) error {
-	agent, err := InitAgent(from, 5, s.code, opts...)
+	client, err := InitClient(from, 5, s.code, opts...)
 	if err != nil {
 		return err
 	}
-	s.agent = agent
+	s.client = client
 
 	go func() {
 		s.requestJob()
@@ -88,7 +88,7 @@ func (s *Server) requestJob() {
 	// TODO: rate limiter
 
 	for {
-		j, err := s.agent.Ask()
+		j, err := s.client.Ask()
 		if err != nil {
 			return
 		}
@@ -123,7 +123,7 @@ func (s *Server) Ask(pass *job.Passphrase, stream job.Service_AskServer) error {
 
 // Stop stops the server and engine
 func (s *Server) Stop() error {
-	s.agent.Close()
+	s.client.Close()
 	close(s.jc)
 	return s.engine.Stop()
 }

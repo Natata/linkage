@@ -14,33 +14,33 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// Agent response for build the connection
+// Client response for build the connection
 // and returns the job when user ask it
-type Agent struct {
+type Client struct {
 	addr       string
 	conn       *grpc.ClientConn
 	stream     job.Service_AskClient
 	retryLimit int
 }
 
-// InitAgent reutrn an Agent instance
-func InitAgent(addr string, retryLimit int, code Code, opts ...grpc.DialOption) (*Agent, error) {
-	agent := &Agent{
+// InitClient reutrn an Client instance
+func InitClient(addr string, retryLimit int, code Code, opts ...grpc.DialOption) (*Client, error) {
+	client := &Client{
 		addr:       addr,
 		retryLimit: retryLimit,
 	}
 
 	// prepare for recieving data
-	err := agent.start(code, opts...)
+	err := client.start(code, opts...)
 	if err != nil {
 		return nil, err
 	}
 
-	return agent, nil
+	return client, nil
 }
 
 // start build the connection and preserve the stream
-func (s *Agent) start(code Code, opts ...grpc.DialOption) error {
+func (s *Client) start(code Code, opts ...grpc.DialOption) error {
 	err := s.dial(opts...)
 	if err != nil {
 		st := status.Convert(err)
@@ -70,7 +70,7 @@ func (s *Agent) start(code Code, opts ...grpc.DialOption) error {
 	return nil
 }
 
-func (s *Agent) dial(opts ...grpc.DialOption) error {
+func (s *Client) dial(opts ...grpc.DialOption) error {
 	conn, err := grpc.Dial(s.addr, opts...)
 	if err != nil {
 		return err
@@ -80,7 +80,7 @@ func (s *Agent) dial(opts ...grpc.DialOption) error {
 	return nil
 }
 
-func (s *Agent) connect(code Code) error {
+func (s *Client) connect(code Code) error {
 	client := job.NewServiceClient(s.conn)
 	stream, err := client.Ask(context.Background(), &job.Passphrase{
 		Code: code,
@@ -94,7 +94,7 @@ func (s *Agent) connect(code Code) error {
 }
 
 // Ask recieve the job from server
-func (s *Agent) Ask() (*Job, error) {
+func (s *Client) Ask() (*Job, error) {
 	gj, err := s.retry()
 	if err != nil {
 		if err == io.EOF {
@@ -115,11 +115,11 @@ func (s *Agent) Ask() (*Job, error) {
 }
 
 // Close closes the connection
-func (s *Agent) Close() {
+func (s *Client) Close() {
 	s.conn.Close()
 }
 
-func (s *Agent) retry() (*job.Job, error) {
+func (s *Client) retry() (*job.Job, error) {
 	for times := 0; times < s.retryLimit; times++ {
 		gj, err := s.stream.Recv()
 		if err == nil {
