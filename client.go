@@ -17,17 +17,17 @@ import (
 // Client response for build the connection
 // and returns the job when user ask it
 type Client struct {
-	addr       string
-	conn       *grpc.ClientConn
-	stream     job.Service_AskClient
-	retryLimit int
+	addr     string
+	conn     *grpc.ClientConn
+	stream   job.Service_AskClient
+	maxRetry int
 }
 
 // InitClient reutrn an Client instance
-func InitClient(addr string, retryLimit int, code Code, opts ...grpc.DialOption) (*Client, error) {
+func InitClient(addr string, maxRetry int, code Code, opts ...grpc.DialOption) (*Client, error) {
 	client := &Client{
-		addr:       addr,
-		retryLimit: retryLimit,
+		addr:     addr,
+		maxRetry: maxRetry,
 	}
 
 	// prepare for recieving data
@@ -120,7 +120,7 @@ func (s *Client) Close() {
 }
 
 func (s *Client) retry() (*job.Job, error) {
-	for times := 0; times < s.retryLimit; times++ {
+	for times := 0; times < s.maxRetry; times++ {
 		gj, err := s.stream.Recv()
 		if err == nil {
 			return gj, nil
@@ -133,5 +133,5 @@ func (s *Client) retry() (*job.Job, error) {
 		time.Sleep(long * time.Second)
 	}
 
-	return nil, status.New(codes.Unavailable, fmt.Sprintf("try %v times, stream is unavailable", s.retryLimit)).Err()
+	return nil, status.New(codes.Unavailable, fmt.Sprintf("try %v times, stream is unavailable", s.maxRetry)).Err()
 }
