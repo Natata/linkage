@@ -17,6 +17,24 @@ func CreateJob(payload string, metadata map[string]string) *Job {
 	}
 }
 
+// GetPayload is nil-safe method to get payload in job
+func (j *Job) GetPayload() string {
+	if j == nil {
+		return ""
+	}
+
+	return j.Payload
+}
+
+// GetMetadata is nil-safe method to get metadata in job
+func (j *Job) GetMetadata() map[string]string {
+	if j == nil {
+		return map[string]string{}
+	}
+
+	return j.Metadata
+}
+
 func toGRPCJob(j *Job) *job.Job {
 	return &job.Job{
 		Payload:  j.Payload,

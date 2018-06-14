@@ -8,24 +8,24 @@ import (
 	"google.golang.org/grpc"
 )
 
-// Addr is address type host:port
-type Addr = string
-
 // Server implement JobServiceServer and use JobServiceClient
 // to recieve job and accept stream request
 type Server struct {
-	code    Code
-	at      Addr
-	srvOpts []grpc.ServerOption
-	engine  Engine
-	client  *Client
-	jc      chan *Job
+	dailInfo   DialInfo
+	at         Addr
+	srvOpts    []grpc.ServerOption
+	engine     Engine
+	client     *Client
+	income     chan *Job
+	outcome    map[Code][]job.Service_AskServer
+	done       chan struct{}
+	codeAssert CodeAssert
 }
 
 // Engine handle the request
 type Engine interface {
-	Register(stream job.Service_AskServer) (chan Result, error)
-	Start(jc chan *Job) error
+	Register(chan<- *Job) error
+	Start(<-chan *Job) error
 	Stop() error
 }
 
@@ -35,28 +35,40 @@ type Result struct {
 	Msg  string
 }
 
+// DialInfo struct is the info for dial to remote service
+type DialInfo struct {
+	connCode Code
+	addr     Addr
+}
+
+// CodeAssert asserts if code is valid
+type CodeAssert = func(code Code) bool
+
 // InitServer init server
-func InitServer(code Code, at Addr, engine Engine, srvOpts []grpc.ServerOption) *Server {
+func InitServer(at Addr, engine Engine, srvOpts []grpc.ServerOption, codeAssert CodeAssert) *Server {
 	return &Server{
-		code:    code,
-		at:      at,
-		srvOpts: srvOpts,
-		engine:  engine,
+		at:         at,
+		srvOpts:    srvOpts,
+		engine:     engine,
+		income:     make(chan *Job),
+		outcome:    map[Code][]job.Service_AskServer{},
+		done:       make(chan struct{}),
+		codeAssert: codeAssert,
 	}
 }
 
 // Run runs the server
-func (s *Server) Run(from Addr, dialOpts []grpc.DialOption) error {
+func (s *Server) Run(dialInfo DialInfo, dialOpts []grpc.DialOption) error {
 	// connect remote server to get job
-	err := s.connect(from, dialOpts)
+	err := s.connect(dialInfo, dialOpts)
 	if err != nil {
 		return err
 	}
 
 	// start engine
-	s.jc = make(chan *Job)
+	s.income = make(chan *Job)
 	go func() {
-		s.engine.Start(s.jc)
+		s.engine.Start(s.income)
 	}()
 
 	// start this server
@@ -70,8 +82,8 @@ func (s *Server) Run(from Addr, dialOpts []grpc.DialOption) error {
 	return gsrv.Serve(lis)
 }
 
-func (s *Server) connect(from Addr, opts []grpc.DialOption) error {
-	client, err := InitClient(from, 5, s.code, opts...)
+func (s *Server) connect(dialInfo DialInfo, opts []grpc.DialOption) error {
+	client, err := InitClient(dialInfo.addr, 5, dialInfo.connCode, opts...)
 	if err != nil {
 		return err
 	}
@@ -90,10 +102,11 @@ func (s *Server) requestJob() {
 	for {
 		j, err := s.client.Ask()
 		if err != nil {
+			s.Stop()
 			return
 		}
 
-		s.jc <- j
+		s.income <- j
 	}
 }
 
@@ -101,18 +114,29 @@ func (s *Server) requestJob() {
 
 // Ask implement jobServiceServer interface
 func (s *Server) Ask(pass *job.Passphrase, stream job.Service_AskServer) error {
-	if pass.Code != s.code {
-		return fmt.Errorf("wrong passcode")
+	if !s.codeAssert(pass.GetCode()) {
+		return fmt.Errorf("wrong passcode %v", pass.GetCode())
 	}
 
-	done, err := s.engine.Register(stream)
+	outcome := make(chan *Job)
+
+	err := s.engine.Register(outcome)
 	if err != nil {
 		return err
 	}
 
-	result := <-done
-	if result.Code != 0 {
-		return fmt.Errorf(result.Msg)
+	for j := range outcome {
+		gj := toGRPCJob(j)
+		err := stream.Send(gj)
+		if err != nil {
+			return err
+		}
+
+		select {
+		case <-s.done:
+			return nil
+		default:
+		}
 	}
 
 	return nil
@@ -124,6 +148,9 @@ func (s *Server) Ask(pass *job.Passphrase, stream job.Service_AskServer) error {
 // Stop stops the server and engine
 func (s *Server) Stop() error {
 	s.client.Close()
-	close(s.jc)
-	return s.engine.Stop()
+	close(s.income)
+	err := s.engine.Stop()
+	close(s.done)
+
+	return err
 }
