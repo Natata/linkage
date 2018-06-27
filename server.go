@@ -39,28 +39,37 @@ type Result struct {
 type DialInfo struct {
 	connCode Code
 	addr     Addr
+	opts     []grpc.DialOption
+}
+
+// BuildInfo struct
+type BuildInfo struct {
+	at         Addr
+	engine     Engine
+	srvOpts    []grpc.ServerOption
+	codeAssert CodeAssert
 }
 
 // CodeAssert asserts if code is valid
 type CodeAssert = func(code Code) bool
 
 // InitServer init server
-func InitServer(at Addr, engine Engine, srvOpts []grpc.ServerOption, codeAssert CodeAssert) *Server {
+func InitServer(info BuildInfo) *Server {
 	return &Server{
-		at:         at,
-		srvOpts:    srvOpts,
-		engine:     engine,
+		at:         info.at,
+		srvOpts:    info.srvOpts,
+		engine:     info.engine,
 		income:     make(chan *Job),
 		outcome:    map[Code][]job.Service_AskServer{},
 		done:       make(chan struct{}),
-		codeAssert: codeAssert,
+		codeAssert: info.codeAssert,
 	}
 }
 
 // Run runs the server
-func (s *Server) Run(dialInfo DialInfo, dialOpts []grpc.DialOption) error {
+func (s *Server) Run(dialInfo DialInfo) error {
 	// connect remote server to get job
-	err := s.connect(dialInfo, dialOpts)
+	err := s.connect(dialInfo)
 	if err != nil {
 		return err
 	}
@@ -82,8 +91,12 @@ func (s *Server) Run(dialInfo DialInfo, dialOpts []grpc.DialOption) error {
 	return gsrv.Serve(lis)
 }
 
-func (s *Server) connect(dialInfo DialInfo, opts []grpc.DialOption) error {
-	client, err := InitClient(dialInfo.addr, 5, dialInfo.connCode, opts...)
+func (s *Server) connect(dialInfo DialInfo) error {
+	client, err := InitClient(dialInfo.addr, 5)
+	if err != nil {
+		return err
+	}
+	err = client.Dial(dialInfo.connCode, dialInfo.opts...)
 	if err != nil {
 		return err
 	}

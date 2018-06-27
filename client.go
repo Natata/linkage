@@ -14,7 +14,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// Client response for build the connection
+// Client response for build the connection to remote linkage
 // and returns the job when user ask it
 type Client struct {
 	addr     string
@@ -24,23 +24,17 @@ type Client struct {
 }
 
 // InitClient reutrn an Client instance
-func InitClient(addr string, maxRetry int, code Code, opts ...grpc.DialOption) (*Client, error) {
+func InitClient(addr string, maxRetry int) (*Client, error) {
 	client := &Client{
 		addr:     addr,
 		maxRetry: maxRetry,
 	}
 
-	// prepare for recieving data
-	err := client.start(code, opts...)
-	if err != nil {
-		return nil, err
-	}
-
 	return client, nil
 }
 
-// start build the connection and preserve the stream
-func (s *Client) start(code Code, opts ...grpc.DialOption) error {
+// Dial to remote lickage server and preserve the stream
+func (s *Client) Dial(code Code, opts ...grpc.DialOption) error {
 	err := s.dial(opts...)
 	if err != nil {
 		st := status.Convert(err)
