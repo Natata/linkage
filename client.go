@@ -123,9 +123,14 @@ func (s *Client) retry() (*job.Job, error) {
 		if err == io.EOF {
 			return nil, err
 		}
-		long := time.Duration(math.Pow(2, float64(times)))
-		time.Sleep(long * time.Second)
+
+		waitToRetry(times, s.maxRetry)
 	}
 
 	return nil, status.New(codes.Unavailable, fmt.Sprintf("try %v times, stream is unavailable", s.maxRetry)).Err()
+}
+
+func waitToRetry(times int, maxRetry int) {
+	long := time.Duration(math.Pow(2, float64(times)))
+	time.Sleep(long * time.Second)
 }

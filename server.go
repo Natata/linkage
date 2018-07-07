@@ -12,12 +12,11 @@ import (
 // to recieve job and accept stream request
 type Server struct {
 	dailInfo   DialInfo
-	at         Addr
+	addr       Addr
 	srvOpts    []grpc.ServerOption
 	engine     Engine
 	client     *Client
 	income     chan *Job
-	outcome    map[Code][]job.Service_AskServer
 	done       chan struct{}
 	codeAssert CodeAssert
 }
@@ -44,7 +43,7 @@ type DialInfo struct {
 
 // BuildInfo struct
 type BuildInfo struct {
-	at         Addr
+	addr       Addr
 	engine     Engine
 	srvOpts    []grpc.ServerOption
 	codeAssert CodeAssert
@@ -56,7 +55,7 @@ type CodeAssert = func(code Code) bool
 // InitServer init server
 func InitServer(info BuildInfo) *Server {
 	return &Server{
-		at:         info.at,
+		addr:       info.addr,
 		srvOpts:    info.srvOpts,
 		engine:     info.engine,
 		income:     make(chan *Job),
@@ -68,6 +67,8 @@ func InitServer(info BuildInfo) *Server {
 
 // Run runs the server
 func (s *Server) Run(dialInfo DialInfo) error {
+	s.income = make(chan *Job)
+
 	// connect remote server to get job
 	err := s.connect(dialInfo)
 	if err != nil {
@@ -75,7 +76,6 @@ func (s *Server) Run(dialInfo DialInfo) error {
 	}
 
 	// start engine
-	s.income = make(chan *Job)
 	go func() {
 		s.engine.Start(s.income)
 	}()
