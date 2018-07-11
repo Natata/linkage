@@ -14,49 +14,54 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// Waiting define the rule of wait time between each retry
+type Waiting func(attempt int, maxAttempt int)
+
+// DialInfo struct is the info for dial to remote service
+type DialInfo struct {
+	connCode   Code
+	addr       Addr
+	opts       []grpc.DialOption
+	maxAttempt int
+}
+
 // Client response for build the connection to remote linkage
 // and returns the job when user ask it
 type Client struct {
-	addr     string
-	conn     *grpc.ClientConn
-	stream   job.Service_AskClient
-	maxRetry int
+	conn    *grpc.ClientConn
+	stream  job.Service_AskClient
+	info    *DialInfo
+	waiting Waiting
 }
 
 // InitClient reutrn an Client instance
-func InitClient(addr string, maxRetry int) (*Client, error) {
+func InitClient(info *DialInfo, w Waiting) (*Client, error) {
+	if w == nil {
+		w = waitToRetry
+	}
 	client := &Client{
-		addr:     addr,
-		maxRetry: maxRetry,
+		info:    info,
+		waiting: w,
 	}
 
 	return client, nil
 }
 
-// Dial to remote lickage server and preserve the stream
-func (s *Client) Dial(code Code, opts ...grpc.DialOption) error {
-	err := s.dial(opts...)
+// BuildStream to recieve jobs from remote lickage server
+func (s *Client) BuildStream() error {
+	err := s.dial()
 	if err != nil {
-		st := status.Convert(err)
-		log.WithFields(log.Fields{
-			"error_code":    st.Code(),
-			"error_message": st.Message(),
-		}).Error("fail to dial")
+		log.Error("fail to dial")
 		return err
 	}
 	log.WithFields(log.Fields{
-		"address": s.addr,
+		"address": s.info.addr,
 	}).Info("dial success")
 
 	// ask the stream for job
-	err = s.connect(code)
+	err = s.connect()
 	if err != nil {
-		st := status.Convert(err)
-		log.WithFields(log.Fields{
-			"code":          code,
-			"error_code":    st.Code(),
-			"error_message": st.Message(),
-		}).Errorf("fail to connect")
+		log.Error("fail to connect")
 		return err
 	}
 	log.Infof("connect success")
@@ -64,8 +69,8 @@ func (s *Client) Dial(code Code, opts ...grpc.DialOption) error {
 	return nil
 }
 
-func (s *Client) dial(opts ...grpc.DialOption) error {
-	conn, err := grpc.Dial(s.addr, opts...)
+func (s *Client) dial() error {
+	conn, err := grpc.Dial(s.info.addr, s.info.opts...)
 	if err != nil {
 		return err
 	}
@@ -74,16 +79,15 @@ func (s *Client) dial(opts ...grpc.DialOption) error {
 	return nil
 }
 
-func (s *Client) connect(code Code) error {
+func (s *Client) connect() error {
 	client := job.NewServiceClient(s.conn)
 	stream, err := client.Ask(context.Background(), &job.Passphrase{
-		Code: code,
+		Code: s.info.connCode,
 	})
 	if err != nil {
 		return err
 	}
 	s.stream = stream
-
 	return nil
 }
 
@@ -91,17 +95,7 @@ func (s *Client) connect(code Code) error {
 func (s *Client) Ask() (*Job, error) {
 	gj, err := s.retry()
 	if err != nil {
-		if err == io.EOF {
-			return nil, io.EOF
-		}
 
-		st := status.Convert(err)
-		log.WithFields(log.Fields{
-			"error_code":    st.Code(),
-			"error_message": st.Message(),
-			"address":       s.addr,
-		}).Error("recieve fail, close connect")
-		s.Close()
 		return nil, err
 	}
 
@@ -114,7 +108,7 @@ func (s *Client) Close() {
 }
 
 func (s *Client) retry() (*job.Job, error) {
-	for times := 0; times < s.maxRetry; times++ {
+	for attempt := 0; attempt < s.info.maxAttempt; attempt++ {
 		gj, err := s.stream.Recv()
 		if err == nil {
 			return gj, nil
@@ -124,10 +118,10 @@ func (s *Client) retry() (*job.Job, error) {
 			return nil, err
 		}
 
-		waitToRetry(times, s.maxRetry)
+		s.waiting(attempt, s.info.maxAttempt)
 	}
 
-	return nil, status.New(codes.Unavailable, fmt.Sprintf("try %v times, stream is unavailable", s.maxRetry)).Err()
+	return nil, status.New(codes.Unavailable, fmt.Sprintf("try %v times, stream is unavailable", s.info.maxAttempt)).Err()
 }
 
 func waitToRetry(times int, maxRetry int) {

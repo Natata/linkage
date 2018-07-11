@@ -11,14 +11,8 @@ import (
 // Server implement JobServiceServer and use JobServiceClient
 // to recieve job and accept stream request
 type Server struct {
-	dailInfo   DialInfo
-	addr       Addr
-	srvOpts    []grpc.ServerOption
-	engine     Engine
-	client     *Client
-	income     chan *Job
-	done       chan struct{}
-	codeAssert CodeAssert
+	info *BuildInfo
+	done chan struct{}
 }
 
 // Engine handle the request
@@ -34,13 +28,6 @@ type Result struct {
 	Msg  string
 }
 
-// DialInfo struct is the info for dial to remote service
-type DialInfo struct {
-	connCode Code
-	addr     Addr
-	opts     []grpc.DialOption
-}
-
 // BuildInfo struct
 type BuildInfo struct {
 	addr       Addr
@@ -53,87 +40,38 @@ type BuildInfo struct {
 type CodeAssert = func(code Code) bool
 
 // InitServer init server
-func InitServer(info BuildInfo) *Server {
+func InitServer(info *BuildInfo) (*Server, error) {
 	return &Server{
-		addr:       info.addr,
-		srvOpts:    info.srvOpts,
-		engine:     info.engine,
-		income:     make(chan *Job),
-		outcome:    map[Code][]job.Service_AskServer{},
-		done:       make(chan struct{}),
-		codeAssert: info.codeAssert,
-	}
+		info: info,
+		done: make(chan struct{}),
+	}, nil
 }
 
 // Run runs the server
-func (s *Server) Run(dialInfo DialInfo) error {
-	s.income = make(chan *Job)
-
-	// connect remote server to get job
-	err := s.connect(dialInfo)
-	if err != nil {
-		return err
-	}
-
-	// start engine
-	go func() {
-		s.engine.Start(s.income)
-	}()
-
+func (s *Server) Run() error {
 	// start this server
-	lis, err := net.Listen("tcp", s.at)
+	lis, err := net.Listen("tcp", s.info.addr)
 	if err != nil {
 		return err
 	}
 	ss := s
-	gsrv := grpc.NewServer(s.srvOpts...)
+	gsrv := grpc.NewServer(s.info.srvOpts...)
 	job.RegisterServiceServer(gsrv, ss)
 	return gsrv.Serve(lis)
-}
-
-func (s *Server) connect(dialInfo DialInfo) error {
-	client, err := InitClient(dialInfo.addr, 5)
-	if err != nil {
-		return err
-	}
-	err = client.Dial(dialInfo.connCode, dialInfo.opts...)
-	if err != nil {
-		return err
-	}
-	s.client = client
-
-	go func() {
-		s.requestJob()
-	}()
-	return nil
-}
-
-func (s *Server) requestJob() {
-
-	// TODO: rate limiter
-
-	for {
-		j, err := s.client.Ask()
-		if err != nil {
-			s.Stop()
-			return
-		}
-
-		s.income <- j
-	}
 }
 
 // implement jobServer
 
 // Ask implement jobServiceServer interface
 func (s *Server) Ask(pass *job.Passphrase, stream job.Service_AskServer) error {
-	if !s.codeAssert(pass.GetCode()) {
+	if !s.info.codeAssert(pass.GetCode()) {
 		return fmt.Errorf("wrong passcode %v", pass.GetCode())
 	}
 
 	outcome := make(chan *Job)
+	defer close(outcome)
 
-	err := s.engine.Register(outcome)
+	err := s.info.engine.Register(outcome)
 	if err != nil {
 		return err
 	}
@@ -160,10 +98,7 @@ func (s *Server) Ask(pass *job.Passphrase, stream job.Service_AskServer) error {
 
 // Stop stops the server and engine
 func (s *Server) Stop() error {
-	s.client.Close()
-	close(s.income)
-	err := s.engine.Stop()
 	close(s.done)
 
-	return err
+	return nil
 }
