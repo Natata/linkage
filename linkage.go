@@ -68,7 +68,7 @@ func (s *Linkage) Run() error {
 	}
 
 	// start engine
-	s.engine.Start(s.income)
+	go s.engine.Start(s.income)
 
 	// start server
 	return s.server.Run()
@@ -114,7 +114,7 @@ func (s *Linkage) askJob() error {
 		log.WithFields(log.Fields{
 			"error_code":    st.Code(),
 			"error_message": st.Message(),
-			"address":       s.client.info.addr,
+			"address":       s.client.info.Addr,
 		}).Error("recieve fail, close connect")
 		return err
 	}

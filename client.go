@@ -19,10 +19,10 @@ type Waiting func(attempt int, maxAttempt int)
 
 // DialInfo struct is the info for dial to remote service
 type DialInfo struct {
-	connCode   Code
-	addr       Addr
-	opts       []grpc.DialOption
-	maxAttempt int
+	ConnCode   Code
+	Addr       Addr
+	Opts       []grpc.DialOption
+	MaxAttempt int
 }
 
 // Client response for build the connection to remote linkage
@@ -55,7 +55,7 @@ func (s *Client) BuildStream() error {
 		return err
 	}
 	log.WithFields(log.Fields{
-		"address": s.info.addr,
+		"address": s.info.Addr,
 	}).Info("dial success")
 
 	// ask the stream for job
@@ -70,7 +70,7 @@ func (s *Client) BuildStream() error {
 }
 
 func (s *Client) dial() error {
-	conn, err := grpc.Dial(s.info.addr, s.info.opts...)
+	conn, err := grpc.Dial(s.info.Addr, s.info.Opts...)
 	if err != nil {
 		return err
 	}
@@ -82,7 +82,7 @@ func (s *Client) dial() error {
 func (s *Client) connect() error {
 	client := job.NewServiceClient(s.conn)
 	stream, err := client.Ask(context.Background(), &job.Passphrase{
-		Code: s.info.connCode,
+		Code: s.info.ConnCode,
 	})
 	if err != nil {
 		return err
@@ -107,7 +107,7 @@ func (s *Client) Close() {
 }
 
 func (s *Client) retry() (*job.Job, error) {
-	for attempt := 0; attempt < s.info.maxAttempt; attempt++ {
+	for attempt := 0; attempt < s.info.MaxAttempt; attempt++ {
 		gj, err := s.stream.Recv()
 		if err == nil {
 			return gj, nil
@@ -117,10 +117,10 @@ func (s *Client) retry() (*job.Job, error) {
 			return nil, err
 		}
 
-		s.waiting(attempt, s.info.maxAttempt)
+		s.waiting(attempt, s.info.MaxAttempt)
 	}
 
-	return nil, status.New(codes.Unavailable, fmt.Sprintf("try %v times, stream is unavailable", s.info.maxAttempt)).Err()
+	return nil, status.New(codes.Unavailable, fmt.Sprintf("try %v times, stream is unavailable", s.info.MaxAttempt)).Err()
 }
 
 func waitToRetry(times int, maxRetry int) {
