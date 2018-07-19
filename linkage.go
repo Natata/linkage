@@ -1,6 +1,7 @@
 package linkage
 
 import (
+	"fmt"
 	"io"
 
 	log "github.com/sirupsen/logrus"
@@ -19,40 +20,52 @@ type Linkage struct {
 
 // InitLinkage init a linkage service
 func InitLinkage(bi *BuildInfo, di *DialInfo, w Waiting) (*Linkage, error) {
-	l := &Linkage{}
-
-	cli, err := InitClient(di, w)
-	if err != nil {
-		return nil, err
+	if bi == nil {
+		return nil, fmt.Errorf("should have build info")
 	}
-	l.client = cli
+
+	l := &Linkage{
+		server: nil,
+		client: nil,
+		income: make(chan *Job),
+	}
+
+	if di != nil {
+		cli, err := InitClient(di, w)
+		if err != nil {
+			return nil, err
+		}
+		l.client = cli
+	}
 
 	// NOTE: use linkage as the engine of server
-	en := bi.engine
-	bi.engine = l
+	en := bi.Engine
+	bi.Engine = l
 	srv, err := InitServer(bi)
 	if err != nil {
 		return nil, err
 	}
+	log.Printf("init server")
 	l.server = srv
 	l.engine = en
-	l.income = make(chan *Job)
 	return l, nil
 }
 
 // Run start to run linkage service
 func (s *Linkage) Run() error {
 	// start client
-	err := s.client.BuildStream()
-	if err != nil {
-		st := status.Convert(err)
-		log.WithFields(log.Fields{
-			"error_code":    st.Code(),
-			"error_message": st.Message(),
-		}).Error("fail to build stream")
-		return err
+	if s.client != nil {
+		err := s.client.BuildStream()
+		if err != nil {
+			st := status.Convert(err)
+			log.WithFields(log.Fields{
+				"error_code":    st.Code(),
+				"error_message": st.Message(),
+			}).Error("fail to build stream")
+			return err
+		}
+		go s.askJobRoutine()
 	}
-	go s.askJobRoutine()
 
 	// start engine
 	s.engine.Start(s.income)

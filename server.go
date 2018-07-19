@@ -5,6 +5,7 @@ import (
 	"linkage/proto/job"
 	"net"
 
+	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 )
 
@@ -30,10 +31,10 @@ type Result struct {
 
 // BuildInfo struct
 type BuildInfo struct {
-	addr       Addr
-	engine     Engine
-	srvOpts    []grpc.ServerOption
-	codeAssert CodeAssert
+	Addr       Addr
+	Engine     Engine
+	SrvOpts    []grpc.ServerOption
+	CodeAssert CodeAssert
 }
 
 // CodeAssert asserts if code is valid
@@ -50,12 +51,12 @@ func InitServer(info *BuildInfo) (*Server, error) {
 // Run runs the server
 func (s *Server) Run() error {
 	// start this server
-	lis, err := net.Listen("tcp", s.info.addr)
+	lis, err := net.Listen("tcp", s.info.Addr)
 	if err != nil {
 		return err
 	}
 	ss := s
-	gsrv := grpc.NewServer(s.info.srvOpts...)
+	gsrv := grpc.NewServer(s.info.SrvOpts...)
 	job.RegisterServiceServer(gsrv, ss)
 	return gsrv.Serve(lis)
 }
@@ -64,17 +65,20 @@ func (s *Server) Run() error {
 
 // Ask implement jobServiceServer interface
 func (s *Server) Ask(pass *job.Passphrase, stream job.Service_AskServer) error {
-	if !s.info.codeAssert(pass.GetCode()) {
+	if !s.info.CodeAssert(pass.GetCode()) {
 		return fmt.Errorf("wrong passcode %v", pass.GetCode())
 	}
 
 	outcome := make(chan *Job)
 	defer close(outcome)
 
-	err := s.info.engine.Register(outcome)
-	if err != nil {
-		return err
-	}
+	go func() {
+		err := s.info.Engine.Register(outcome)
+		if err != nil {
+			log.Printf("error: %v", err)
+			return
+		}
+	}()
 
 	for j := range outcome {
 		gj := toGRPCJob(j)
@@ -99,6 +103,6 @@ func (s *Server) Ask(pass *job.Passphrase, stream job.Service_AskServer) error {
 // Stop stops the server and engine
 func (s *Server) Stop() error {
 	close(s.done)
-
+	s.info.Engine.Stop()
 	return nil
 }

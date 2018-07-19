@@ -95,7 +95,6 @@ func (s *Client) connect() error {
 func (s *Client) Ask() (*Job, error) {
 	gj, err := s.retry()
 	if err != nil {
-
 		return nil, err
 	}
 
