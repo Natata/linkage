@@ -75,8 +75,8 @@ func (s *Linkage) Run() error {
 }
 
 // Register interface
-func (s *Linkage) Register(outcome chan<- *Job) error {
-	return s.engine.Register(outcome)
+func (s *Linkage) Register(outcome chan<- *Job, closeSig chan struct{}) error {
+	return s.engine.Register(outcome, closeSig)
 }
 
 // Start interface

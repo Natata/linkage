@@ -18,8 +18,8 @@ type Server struct {
 
 // Engine handle the request
 type Engine interface {
-	Register(chan<- *Job) error
-	Start(<-chan *Job) error
+	Register(outcome chan<- *Job, closeSig chan struct{}) error
+	Start(income <-chan *Job) error
 	Stop() error
 }
 
@@ -71,9 +71,10 @@ func (s *Server) Ask(pass *job.Passphrase, stream job.Service_AskServer) error {
 
 	outcome := make(chan *Job)
 	defer close(outcome)
+	closeSig := make(chan struct{})
 
 	go func() {
-		err := s.info.Engine.Register(outcome)
+		err := s.info.Engine.Register(outcome, closeSig)
 		if err != nil {
 			log.Printf("error: %v", err)
 			return
@@ -84,6 +85,8 @@ func (s *Server) Ask(pass *job.Passphrase, stream job.Service_AskServer) error {
 		gj := toGRPCJob(j)
 		err := stream.Send(gj)
 		if err != nil {
+			log.Printf("err: %v", err)
+			close(closeSig)
 			return err
 		}
 

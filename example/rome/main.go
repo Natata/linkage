@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"linkage"
+	"log"
 	"time"
 )
 
@@ -25,16 +26,23 @@ func main() {
 }
 
 // FactorEngine engine
-type FactorEngine struct {
-}
+type FactorEngine struct{}
 
 // Register chan
-func (s *FactorEngine) Register(ch chan<- *linkage.Job) error {
+func (s *FactorEngine) Register(ch chan<- *linkage.Job, closeSig chan struct{}) error {
 	for {
 		time.Sleep(3 * time.Second)
-		ch <- &linkage.Job{
+		j := &linkage.Job{
 			Payload: fmt.Sprintf("%v", time.Now()),
 		}
+		select {
+		case <-closeSig:
+			log.Printf("close ")
+			return nil
+		default:
+		}
+		ch <- j
+		log.Println("send")
 	}
 }
 

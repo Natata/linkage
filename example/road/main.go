@@ -38,7 +38,7 @@ type RoadEngine struct {
 }
 
 // Register chan
-func (s *RoadEngine) Register(ch chan<- *linkage.Job) error {
+func (s *RoadEngine) Register(ch chan<- *linkage.Job, closeSig chan struct{}) error {
 
 	// No implement
 
