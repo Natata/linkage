@@ -37,6 +37,7 @@ type Client struct {
 // InitClient reutrn an Client instance
 func InitClient(info *DialInfo, w Waiting) (*Client, error) {
 	if w == nil {
+		log.Info("use defult wait to retry mechanism")
 		w = waitToRetry
 	}
 	client := &Client{
@@ -51,7 +52,7 @@ func InitClient(info *DialInfo, w Waiting) (*Client, error) {
 func (s *Client) BuildStream() error {
 	err := s.dial()
 	if err != nil {
-		log.Error("fail to dial")
+		log.Errorf("fail to dial, error: %v", err)
 		return err
 	}
 	log.WithFields(log.Fields{
@@ -107,7 +108,8 @@ func (s *Client) Close() {
 }
 
 func (s *Client) retry() (*job.Job, error) {
-	for attempt := 0; attempt < s.info.MaxAttempt; attempt++ {
+	attempt := 0
+	for {
 		gj, err := s.stream.Recv()
 		if err == nil {
 			return gj, nil
@@ -117,6 +119,12 @@ func (s *Client) retry() (*job.Job, error) {
 			return nil, err
 		}
 
+		log.Errorf("recieve fail, error: %v", err)
+		attempt++
+		if attempt == s.info.MaxAttempt {
+			break
+		}
+		log.Info("wait to retry")
 		s.waiting(attempt, s.info.MaxAttempt)
 	}
 

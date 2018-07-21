@@ -106,6 +106,6 @@ func (s *Server) Ask(pass *job.Passphrase, stream job.Service_AskServer) error {
 // Stop stops the server and engine
 func (s *Server) Stop() error {
 	close(s.done)
-	s.info.Engine.Stop()
+	//s.info.Engine.Stop()
 	return nil
 }

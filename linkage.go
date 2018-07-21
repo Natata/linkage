@@ -86,7 +86,7 @@ func (s *Linkage) Start(<-chan *Job) error {
 
 // Stop interface
 func (s *Linkage) Stop() error {
-	close(s.income)
+	s.engine.Stop()
 	s.client.Close()
 	s.server.Stop()
 	return nil
@@ -96,8 +96,9 @@ func (s *Linkage) askJobRoutine() {
 	for {
 		err := s.askJob()
 		if err != nil {
+			log.Errorf("ask job fail, error: %v", err)
+			log.Info("stop linkage")
 			s.Stop()
-			s.client.Close()
 			return
 		}
 	}
