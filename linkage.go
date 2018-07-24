@@ -3,8 +3,6 @@ package linkage
 import (
 	"fmt"
 	"io"
-	"math"
-	"time"
 
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc/status"
@@ -30,7 +28,7 @@ func InitLinkage(bi *BuildInfo, di *DialInfo, w Waiting) (*Linkage, error) {
 
 	if w == nil {
 		log.Info("use defult wait to retry mechanism")
-		w = waitToRetry
+		w = WaitFactor(1, 2, 3)
 	}
 
 	l := &Linkage{
@@ -38,6 +36,7 @@ func InitLinkage(bi *BuildInfo, di *DialInfo, w Waiting) (*Linkage, error) {
 		client:     nil,
 		income:     make(chan *Job),
 		maxAttempt: 2,
+		waiting:    w,
 	}
 
 	if di != nil {
@@ -60,9 +59,6 @@ func InitLinkage(bi *BuildInfo, di *DialInfo, w Waiting) (*Linkage, error) {
 	l.engine = en
 	return l, nil
 }
-
-// Waiting define the rule of wait time between each retry
-type Waiting func(attempt int, maxAttempt int)
 
 // Run start to run linkage service
 func (s *Linkage) Run() error {
@@ -138,7 +134,6 @@ func (s *Linkage) askJob() error {
 }
 
 func (s *Linkage) retry() (*Job, error) {
-	attempt := 0
 	for {
 		gj, err := s.client.Ask()
 		if err == nil {
@@ -150,19 +145,10 @@ func (s *Linkage) retry() (*Job, error) {
 		}
 
 		log.Errorf("recieve fail, error: %v", err)
-		attempt++
-		if attempt == s.maxAttempt {
-			break
-		}
 		log.Info("wait to retry")
-		s.waiting(attempt, s.maxAttempt)
+		err = s.waiting()
+		if err != nil {
+			return nil, err
+		}
 	}
-
-	return nil, fmt.Errorf("try %v times, stream is unavailable", s.maxAttempt)
-
-}
-
-func waitToRetry(times int, maxRetry int) {
-	long := time.Duration(math.Pow(2, float64(times)))
-	time.Sleep(long * time.Second)
 }
