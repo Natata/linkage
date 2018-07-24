@@ -3,6 +3,8 @@ package linkage
 import (
 	"fmt"
 	"io"
+	"math"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc/status"
@@ -12,10 +14,12 @@ import (
 // and send jobs to connected client.
 // It also an Engine
 type Linkage struct {
-	server *Server
-	client *Client
-	engine Engine
-	income chan *Job
+	server     *Server
+	client     *Client
+	engine     Engine
+	income     chan *Job
+	maxAttempt int
+	waiting    Waiting
 }
 
 // InitLinkage init a linkage service
@@ -24,14 +28,20 @@ func InitLinkage(bi *BuildInfo, di *DialInfo, w Waiting) (*Linkage, error) {
 		return nil, fmt.Errorf("should have build info")
 	}
 
+	if w == nil {
+		log.Info("use defult wait to retry mechanism")
+		w = waitToRetry
+	}
+
 	l := &Linkage{
-		server: nil,
-		client: nil,
-		income: make(chan *Job),
+		server:     nil,
+		client:     nil,
+		income:     make(chan *Job),
+		maxAttempt: 2,
 	}
 
 	if di != nil {
-		cli, err := InitClient(di, w)
+		cli, err := InitClient(di)
 		if err != nil {
 			return nil, err
 		}
@@ -50,6 +60,9 @@ func InitLinkage(bi *BuildInfo, di *DialInfo, w Waiting) (*Linkage, error) {
 	l.engine = en
 	return l, nil
 }
+
+// Waiting define the rule of wait time between each retry
+type Waiting func(attempt int, maxAttempt int)
 
 // Run start to run linkage service
 func (s *Linkage) Run() error {
@@ -105,7 +118,7 @@ func (s *Linkage) askJobRoutine() {
 }
 
 func (s *Linkage) askJob() error {
-	j, err := s.client.Ask()
+	j, err := s.retry()
 	if err != nil {
 		if err == io.EOF {
 			return io.EOF
@@ -122,4 +135,34 @@ func (s *Linkage) askJob() error {
 
 	s.income <- j
 	return nil
+}
+
+func (s *Linkage) retry() (*Job, error) {
+	attempt := 0
+	for {
+		gj, err := s.client.Ask()
+		if err == nil {
+			return gj, nil
+		}
+
+		if err == io.EOF {
+			return nil, err
+		}
+
+		log.Errorf("recieve fail, error: %v", err)
+		attempt++
+		if attempt == s.maxAttempt {
+			break
+		}
+		log.Info("wait to retry")
+		s.waiting(attempt, s.maxAttempt)
+	}
+
+	return nil, fmt.Errorf("try %v times, stream is unavailable", s.maxAttempt)
+
+}
+
+func waitToRetry(times int, maxRetry int) {
+	long := time.Duration(math.Pow(2, float64(times)))
+	time.Sleep(long * time.Second)
 }
