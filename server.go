@@ -90,7 +90,7 @@ func (s *Server) Ask(pass *job.Passphrase, stream job.Service_AskServer) error {
 		if err != nil {
 			log.Printf("err: %v", err)
 			close(closeSig)
-			return status.Error(codes.Unavailable, "%v", err.Error()).Err()
+			return status.Error(codes.Unavailable, err.Error())
 		}
 
 		select {

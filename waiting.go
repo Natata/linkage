@@ -8,8 +8,8 @@ import (
 // Waiting define the rule of wait time between each retry
 type Waiting func() error
 
-// WaitFactor generate waiting function
-func WaitFactor(init int, grow int, maxRetry int) Waiting {
+// WaitFactory generate waiting function
+func WaitFactory(init int, grow int, maxRetry int) Waiting {
 	if init < 1 {
 		init = 1
 	}

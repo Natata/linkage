@@ -28,7 +28,7 @@ func InitLinkage(bi *BuildInfo, di *DialInfo, w Waiting) (*Linkage, error) {
 
 	if w == nil {
 		log.Info("use defult wait to retry mechanism")
-		w = WaitFactor(1, 2, 3)
+		w = WaitFactory(1, 2, 3)
 	}
 
 	l := &Linkage{
@@ -95,8 +95,8 @@ func (s *Linkage) Start(<-chan *Job) error {
 
 // Stop interface
 func (s *Linkage) Stop() error {
-	s.engine.Stop()
 	s.client.Close()
+	s.engine.Stop()
 	s.server.Stop()
 	return nil
 }
