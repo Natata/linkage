@@ -47,7 +47,7 @@ func (s *Client) BuildStream() error {
 	// ask the stream for job
 	err = s.connect()
 	if err != nil {
-		log.Error("fail to connect")
+		log.Errorf("fail to connect, error: %v", err)
 		return err
 	}
 	log.Infof("connect success")
@@ -89,5 +89,16 @@ func (s *Client) Ask() (*Job, error) {
 
 // Close closes the connection
 func (s *Client) Close() {
-	s.conn.Close()
+	err := s.conn.Close()
+	if err != nil {
+		log.Errorf("conn close fail, error: %v", err)
+	} else {
+		log.Info("conn closed")
+	}
+	err = s.stream.CloseSend()
+	if err != nil {
+		log.Errorf("stream close fail, error: %v", err)
+	} else {
+		log.Info("stream closed")
+	}
 }
