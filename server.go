@@ -7,6 +7,8 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // Server implement JobServiceServer and use JobServiceClient
@@ -58,6 +60,7 @@ func (s *Server) Run() error {
 	ss := s
 	gsrv := grpc.NewServer(s.info.SrvOpts...)
 	job.RegisterServiceServer(gsrv, ss)
+	log.Infof("start listening %v", s.info.Addr)
 	return gsrv.Serve(lis)
 }
 
@@ -87,7 +90,7 @@ func (s *Server) Ask(pass *job.Passphrase, stream job.Service_AskServer) error {
 		if err != nil {
 			log.Printf("err: %v", err)
 			close(closeSig)
-			return err
+			return status.Error(codes.Unavailable, "%v", err.Error()).Err()
 		}
 
 		select {
@@ -100,12 +103,8 @@ func (s *Server) Ask(pass *job.Passphrase, stream job.Service_AskServer) error {
 	return nil
 }
 
-//func (s *Server) Pause()  {}
-//func (s *Server) Resume() {}
-
 // Stop stops the server and engine
 func (s *Server) Stop() error {
 	close(s.done)
-	//s.info.Engine.Stop()
 	return nil
 }
