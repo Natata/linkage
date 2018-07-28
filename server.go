@@ -64,10 +64,10 @@ func (s *Server) Run() error {
 // Ask implement jobServiceServer interface
 func (s *Server) Ask(pass *job.Passphrase, stream job.Service_AskServer) error {
 	if s.shouldClose() {
-		return status.Errorf(code.Abort, "server is closing")
+		return status.Errorf(codes.Aborted, "server is closing")
 	}
 
-	if !s.info.CodeAssert(pass.GetCode()) {
+	if !s.cfg.CodeAssert(pass.GetCode()) {
 		return status.Errorf(codes.InvalidArgument, "wrong passcode %v", pass.GetCode())
 	}
 
@@ -75,7 +75,7 @@ func (s *Server) Ask(pass *job.Passphrase, stream job.Service_AskServer) error {
 	defer s.wg.Done()
 
 	sig := make(chan Signal) // TODO: make(chan error)
-	var outbound chan *Job
+	var outbound <-chan *Job
 	var err error
 	go func() {
 		outbound, err = s.cfg.Engine.Register(sig)

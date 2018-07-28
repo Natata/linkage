@@ -60,15 +60,14 @@ func InitLinkage(addr Addr, engine Engine, srvOpts []grpc.ServerOption, codeAsse
 		Engine:     l,
 		SrvOpts:    srvOpts,
 		CodeAssert: codeAssert,
-		CloseCh:    l.closeCh,
 	}
-	srv, err := InitServer(scfg)
+	srv, err := InitServer(srvCfg)
 	if err != nil {
 		return nil, err
 	}
 	log.Printf("init server")
 	l.server = srv
-	l.engine = en
+	l.engine = engine
 	return l, nil
 }
 
@@ -98,17 +97,19 @@ func (s *Linkage) Run() error {
 
 	// start server
 	go func() {
-		done, err := s.server.Run()
+		err := s.server.Run()
 		if err != nil {
 			s.Stop()
 		}
-		l.serverDoneCh = done
 	}()
+
+	<-s.closeCh
+	return nil
 }
 
 // Register interface
-func (s *Linkage) Register(outcome chan<- *Job, closeSig chan struct{}) error {
-	return s.engine.Register(outcome, closeSig)
+func (s *Linkage) Register(sig chan Signal) (<-chan *Job, error) {
+	return s.engine.Register(sig)
 }
 
 // Start interface
@@ -119,13 +120,17 @@ func (s *Linkage) Start(<-chan *Job) error {
 // Stop interface
 func (s *Linkage) Stop() error {
 	s.client.Close()
-	close(s.closeCh)
 
+	done := s.server.Close()
+	timeThreshold := time.After(2 * time.Minute)
 	select {
-	case done:
-	case time.After(2 * time.Minute):
+	case <-done:
+		log.Infof("server close gracefully")
+	case <-timeThreshold:
+		log.Infof("server close at timeup")
 	}
 
+	close(s.closeCh)
 	return nil
 }
 
