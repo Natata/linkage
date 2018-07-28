@@ -63,6 +63,9 @@ func (s *Server) Run() error {
 
 // Ask implement jobServiceServer interface
 func (s *Server) Ask(pass *job.Passphrase, stream job.Service_AskServer) error {
+
+	log.Infof("recieve connection")
+
 	if s.shouldClose() {
 		return status.Errorf(codes.Aborted, "server is closing")
 	}
@@ -75,15 +78,11 @@ func (s *Server) Ask(pass *job.Passphrase, stream job.Service_AskServer) error {
 	defer s.wg.Done()
 
 	sig := make(chan Signal) // TODO: make(chan error)
-	var outbound <-chan *Job
-	var err error
-	go func() {
-		outbound, err = s.cfg.Engine.Register(sig)
-		if err != nil {
-			log.Errorf("engine register error: %v", err)
-			return
-		}
-	}()
+	outbound, err := s.cfg.Engine.Register(sig)
+	if err != nil {
+		log.Errorf("engine register error: %v", err)
+		return status.Errorf(codes.Unavailable, err.Error())
+	}
 
 	for j := range outbound {
 		gj := toGRPCJob(j)
@@ -91,7 +90,7 @@ func (s *Server) Ask(pass *job.Passphrase, stream job.Service_AskServer) error {
 		if err != nil {
 			log.Errorf("err: %v", err)
 			sig <- Signal{
-				err: err,
+				Err: err,
 			}
 			return status.Error(codes.Unavailable, err.Error())
 		}

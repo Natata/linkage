@@ -8,12 +8,10 @@ import (
 )
 
 func main() {
-	bi := &linkage.BuildInfo{
-		Addr:   ":8081",
-		Engine: &RoadEngine{},
-		CodeAssert: func(code linkage.Code) bool {
-			return true
-		},
+	addr := ":8081"
+	engine := &RoadEngine{}
+	codeAssert := func(code linkage.Code) bool {
+		return true
 	}
 
 	di := &linkage.DialInfo{
@@ -23,7 +21,7 @@ func main() {
 		MaxAttempt: 2,
 	}
 
-	srv, err := linkage.InitLinkage(bi, di, nil)
+	srv, err := linkage.InitLinkage(addr, engine, nil, codeAssert, di, nil)
 	if err != nil {
 		panic(err)
 	}
@@ -38,11 +36,11 @@ type RoadEngine struct {
 }
 
 // Register chan
-func (s *RoadEngine) Register(ch chan<- *linkage.Job, closeSig chan struct{}) error {
+func (s *RoadEngine) Register(sig chan linkage.Signal) (<-chan *linkage.Job, error) {
 
 	// No implement
 
-	return nil
+	return make(chan *linkage.Job), nil
 }
 
 // Start to recieve
@@ -51,10 +49,5 @@ func (s *RoadEngine) Start(ch <-chan *linkage.Job) error {
 		fmt.Println("i got: ", v)
 	}
 
-	return nil
-}
-
-// Stop engine
-func (s *RoadEngine) Stop() error {
 	return nil
 }
