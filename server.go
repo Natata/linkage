@@ -1,9 +1,10 @@
 package linkage
 
 import (
-	"fmt"
 	"linkage/proto/job"
 	"net"
+	"sync"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
@@ -14,15 +15,9 @@ import (
 // Server implement JobServiceServer and use JobServiceClient
 // to recieve job and accept stream request
 type Server struct {
-	info *BuildInfo
-	done chan struct{}
-}
-
-// Engine handle the request
-type Engine interface {
-	Register(outcome chan<- *Job, closeSig chan struct{}) error
-	Start(income <-chan *Job) error
-	Stop() error
+	cfg   *ServerConfig
+	close Done
+	wg    sync.WaitGroup
 }
 
 // Result struct
@@ -31,8 +26,8 @@ type Result struct {
 	Msg  string
 }
 
-// BuildInfo struct
-type BuildInfo struct {
+// ServerConfig struct
+type ServerConfig struct {
 	Addr       Addr
 	Engine     Engine
 	SrvOpts    []grpc.ServerOption
@@ -43,24 +38,24 @@ type BuildInfo struct {
 type CodeAssert = func(code Code) bool
 
 // InitServer init server
-func InitServer(info *BuildInfo) (*Server, error) {
+func InitServer(cfg *ServerConfig) (*Server, error) {
 	return &Server{
-		info: info,
-		done: make(chan struct{}),
+		cfg:   cfg,
+		close: make(Done),
 	}, nil
 }
 
 // Run runs the server
 func (s *Server) Run() error {
 	// start this server
-	lis, err := net.Listen("tcp", s.info.Addr)
+	lis, err := net.Listen("tcp", s.cfg.Addr)
 	if err != nil {
 		return err
 	}
 	ss := s
-	gsrv := grpc.NewServer(s.info.SrvOpts...)
+	gsrv := grpc.NewServer(s.cfg.SrvOpts...)
 	job.RegisterServiceServer(gsrv, ss)
-	log.Infof("start listening %v", s.info.Addr)
+	log.Infof("start listening %v", s.cfg.Addr)
 	return gsrv.Serve(lis)
 }
 
@@ -68,43 +63,86 @@ func (s *Server) Run() error {
 
 // Ask implement jobServiceServer interface
 func (s *Server) Ask(pass *job.Passphrase, stream job.Service_AskServer) error {
-	if !s.info.CodeAssert(pass.GetCode()) {
-		return fmt.Errorf("wrong passcode %v", pass.GetCode())
+	if s.shouldClose() {
+		return status.Errorf(code.Abort, "server is closing")
 	}
 
-	outcome := make(chan *Job)
-	defer close(outcome)
-	closeSig := make(chan struct{})
+	if !s.info.CodeAssert(pass.GetCode()) {
+		return status.Errorf(codes.InvalidArgument, "wrong passcode %v", pass.GetCode())
+	}
 
+	s.wg.Add(1)
+	defer s.wg.Done()
+
+	sig := make(chan Signal) // TODO: make(chan error)
+	var outbound chan *Job
+	var err error
 	go func() {
-		err := s.info.Engine.Register(outcome, closeSig)
+		outbound, err = s.cfg.Engine.Register(sig)
 		if err != nil {
-			log.Printf("error: %v", err)
+			log.Errorf("engine register error: %v", err)
 			return
 		}
 	}()
 
-	for j := range outcome {
+	for j := range outbound {
 		gj := toGRPCJob(j)
-		err := stream.Send(gj)
+		err := stream.Send(gj) // TODO: retry?
 		if err != nil {
-			log.Printf("err: %v", err)
-			close(closeSig)
+			log.Errorf("err: %v", err)
+			sig <- Signal{
+				err: err,
+			}
 			return status.Error(codes.Unavailable, err.Error())
 		}
 
-		select {
-		case <-s.done:
-			return nil
-		default:
+		if s.shouldClose() {
+			log.Infof("server closing")
+			close(sig)
+			break
 		}
 	}
 
-	return nil
+	// clear all left jobs
+	wait := time.After(2 * time.Second)
+	for {
+		select {
+		case j, ok := <-outbound:
+			if !ok {
+				return status.Error(codes.Unavailable, "service closed")
+			}
+
+			gj := toGRPCJob(j)
+			err := stream.Send(gj)
+			if err != nil {
+				log.Errorf("err: %v", err)
+				return status.Error(codes.Unavailable, err.Error())
+			}
+		case <-wait:
+			log.Infof("time up")
+			return status.Error(codes.Unavailable, "service closed")
+		}
+	}
 }
 
-// Stop stops the server and engine
-func (s *Server) Stop() error {
-	close(s.done)
-	return nil
+func (s *Server) shouldClose() bool {
+	select {
+	case <-s.close:
+		return true
+	default:
+		return false
+	}
+}
+
+// Close close the server
+func (s *Server) Close() Done {
+	close(s.close)
+
+	done := make(Done)
+	go func() {
+		s.wg.Wait()
+		close(done)
+	}()
+
+	return done
 }

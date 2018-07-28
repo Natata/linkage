@@ -1,10 +1,11 @@
 package linkage
 
 import (
-	"fmt"
 	"io"
+	"time"
 
 	log "github.com/sirupsen/logrus"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/status"
 )
 
@@ -12,45 +13,56 @@ import (
 // and send jobs to connected client.
 // It also an Engine
 type Linkage struct {
-	server     *Server
-	client     *Client
-	engine     Engine
-	income     chan *Job
-	maxAttempt int
-	waiting    Waiting
+	server       *Server
+	client       *Client
+	engine       Engine
+	income       chan *Job
+	waiting      Waiting
+	closeCh      chan struct{}
+	serverDoneCh chan struct{}
 }
 
 // InitLinkage init a linkage service
-func InitLinkage(bi *BuildInfo, di *DialInfo, w Waiting) (*Linkage, error) {
-	if bi == nil {
-		return nil, fmt.Errorf("should have build info")
-	}
+func InitLinkage(addr Addr, engine Engine, srvOpts []grpc.ServerOption, codeAssert CodeAssert, di *DialInfo, w Waiting) (*Linkage, error) {
+
+	// TODO: check parameter
 
 	if w == nil {
 		log.Info("use defult wait to retry mechanism")
-		w = WaitFactory(1, 2, 3)
+		start := 1
+		grow := 2
+		maxAttempt := 3
+		w = WaitFactory(start, grow, maxAttempt)
 	}
 
 	l := &Linkage{
-		server:     nil,
-		client:     nil,
-		income:     make(chan *Job),
-		maxAttempt: 2,
-		waiting:    w,
+		server:  nil,
+		client:  nil,
+		engine:  engine,
+		income:  make(chan *Job),
+		waiting: w,
+		closeCh: make(chan struct{}),
 	}
 
 	if di != nil {
+		log.Infof("initial client")
 		cli, err := InitClient(di)
 		if err != nil {
+			log.Errorf("fail to initial client")
 			return nil, err
 		}
+		log.Infof("initial client success")
 		l.client = cli
 	}
 
-	// NOTE: use linkage as the engine of server
-	en := bi.Engine
-	bi.Engine = l
-	srv, err := InitServer(bi)
+	srvCfg := &ServerConfig{
+		Addr:       addr,
+		Engine:     l,
+		SrvOpts:    srvOpts,
+		CodeAssert: codeAssert,
+		CloseCh:    l.closeCh,
+	}
+	srv, err := InitServer(scfg)
 	if err != nil {
 		return nil, err
 	}
@@ -77,10 +89,21 @@ func (s *Linkage) Run() error {
 	}
 
 	// start engine
-	go s.engine.Start(s.income)
+	go func() {
+		err := s.engine.Start(s.income)
+		if err != nil {
+			s.Stop()
+		}
+	}()
 
 	// start server
-	return s.server.Run()
+	go func() {
+		done, err := s.server.Run()
+		if err != nil {
+			s.Stop()
+		}
+		l.serverDoneCh = done
+	}()
 }
 
 // Register interface
@@ -96,12 +119,20 @@ func (s *Linkage) Start(<-chan *Job) error {
 // Stop interface
 func (s *Linkage) Stop() error {
 	s.client.Close()
-	s.engine.Stop()
-	s.server.Stop()
+	close(s.closeCh)
+
+	select {
+	case done:
+	case time.After(2 * time.Minute):
+	}
+
 	return nil
 }
 
 func (s *Linkage) askJobRoutine() {
+
+	// TODO: rate limit
+
 	for {
 		err := s.askJob()
 		if err != nil {
@@ -126,7 +157,7 @@ func (s *Linkage) askJob() error {
 			"error_message": st.Message(),
 			"address":       s.client.info.Addr,
 		}).Error("recieve fail, close connect")
-		return err
+		return st.Err()
 	}
 
 	s.income <- j
