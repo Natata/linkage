@@ -50,7 +50,7 @@ Iniital linkage with
 3. Run it
 
 ```
-err := srv.Run
+err := srv.Run()
 ```
 
 example/ have full examples.
